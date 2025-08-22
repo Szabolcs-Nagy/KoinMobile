@@ -1,0 +1,692 @@
+package com.codingfun.szabolcsnagy.presentation
+
+import android.os.Build.VERSION.SDK_INT
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.material3.AlertDialogDefaults
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialTheme.motionScheme
+import androidx.compose.material3.MaterialTheme.typography
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
+import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.rememberSearchBarState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.core.text.parseAsHtml
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navDeepLink
+import androidx.navigation.toRoute
+import androidx.window.core.layout.WindowHeightSizeClass
+import androidx.window.core.layout.WindowWidthSizeClass
+import coil3.ImageLoader
+import coil3.gif.AnimatedImageDecoder
+import coil3.gif.GifDecoder
+import coil3.svg.SvgDecoder
+import com.codingfun.szabolcsnagy.R
+import com.codingfun.szabolcsnagy.R.string
+import com.codingfun.szabolcsnagy.constants.model.SavedStatus
+import com.codingfun.szabolcsnagy.constants.model.WRStatus
+import com.codingfun.szabolcsnagy.constants.model.WikiPhoto
+import com.codingfun.szabolcsnagy.constants.model.WikiPhotoDesc
+import com.codingfun.szabolcsnagy.presentation.image.FullScreenImage
+import com.codingfun.szabolcsnagy.presentation.screens.aboutScreen.AboutScreen
+import com.codingfun.szabolcsnagy.presentation.screens.homeScreen.AppFab
+import com.codingfun.szabolcsnagy.presentation.screens.homeScreen.AppHomeScreen
+import com.codingfun.szabolcsnagy.presentation.screens.homeScreen.AppSearchBar
+import com.codingfun.szabolcsnagy.presentation.screens.savedArticlesScreen.SavedArticlesScreen
+import com.codingfun.szabolcsnagy.presentation.screens.settingsScreen.SettingsScreen
+import com.codingfun.szabolcsnagy.presentation.state.PreferencesState
+import com.codingfun.szabolcsnagy.presentation.ArticleViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun AppScreen(
+    viewModel: ArticleViewModel,
+    preferencesState: PreferencesState,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass
+    val appSearchBarState by viewModel.appSearchBarState.collectAsState()
+    val homeScreenState by viewModel.homeScreenState.collectAsState()
+    val feedState by viewModel.feedState.collectAsState()
+    val savedArticlesState by viewModel.savedArticlesState.collectAsState()
+    val listState by viewModel.articleListState.collectAsState()
+    val searchListState by viewModel.searchListState.collectAsState()
+    val searchBarState = rememberSearchBarState()
+    val feedListState = rememberLazyListState()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val languageSearchStr by viewModel.languageSearchStr.collectAsState()
+    val languageSearchQuery by viewModel.languageSearchQuery.collectAsState("")
+    val motionScheme = motionScheme
+    var showArticleLanguageSheet by rememberSaveable { mutableStateOf(false) }
+    var deepLinkHandled by rememberSaveable { mutableStateOf(false) }
+
+    // Used by the settings screen. These are hoisted here to make the settings screen faster
+    val themeMap: Map<String, Pair<Int, String>> = remember {
+        mapOf(
+            "auto" to Pair(
+                R.drawable.brightness_auto,
+                context.getString(string.themeSystemDefault)
+            ),
+            "light" to Pair(R.drawable.light_mode, context.getString(string.themeLight)),
+            "dark" to Pair(R.drawable.dark_mode, context.getString(string.themeDark))
+        )
+    }
+    val reverseThemeMap: Map<String, String> = remember {
+        mapOf(
+            context.getString(string.themeSystemDefault) to "auto",
+            context.getString(string.themeLight) to "light",
+            context.getString(string.themeDark) to "dark"
+        )
+    }
+    val fontStyleMap: Map<String, String> = remember {
+        mapOf(
+            "sans" to context.getString(string.fontStyleSansSerif),
+            "serif" to context.getString(string.fontStyleSerif)
+        )
+    }
+    val reverseFontStyleMap: Map<String, String> = remember {
+        mapOf(
+            context.getString(string.fontStyleSansSerif) to "sans",
+            context.getString(string.fontStyleSerif) to "serif"
+        )
+    }
+    val fontStyles = remember {
+        listOf(
+            context.getString(string.fontStyleSansSerif),
+            context.getString(string.fontStyleSerif)
+        )
+    }
+
+    val searchBarScrollBehavior =
+        if (
+            windowSizeClass.windowHeightSizeClass == WindowHeightSizeClass.COMPACT ||
+            preferencesState.immersiveMode
+        ) SearchBarDefaults.enterAlwaysSearchBarScrollBehavior()
+        else null
+    val textFieldState = viewModel.textFieldState
+
+    val imageLoader = remember {
+        ImageLoader.Builder(context)
+            .components {
+                add(SvgDecoder.Factory())
+                if (SDK_INT >= 28) {
+                    add(AnimatedImageDecoder.Factory())
+                } else {
+                    add(GifDecoder.Factory())
+                }
+            }
+            .build()
+    }
+
+    val snackBarHostState = remember { SnackbarHostState() }
+
+    val index by remember { derivedStateOf { listState.firstVisibleItemIndex } }
+    val feedIndex by remember { derivedStateOf { feedListState.firstVisibleItemIndex } }
+    val (showDeleteDialog, setShowDeleteDialog) = remember { mutableStateOf(false) }
+    var (historyItem, setHistoryItem) = remember { mutableStateOf("") }
+
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+
+    AppNavigationDrawer(
+        drawerState = drawerState,
+        feedState = feedState,
+        homeScreenState = homeScreenState,
+        listState = listState,
+        feedListState = feedListState,
+        windowSizeClass = windowSizeClass,
+        backStackEntry = navBackStackEntry,
+        onAboutClick = {
+            navController.navigate(About) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        },
+        onHomeClick = {
+            navController.navigate(Home()) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        },
+        onSavedArticlesClick = {
+            navController.navigate(SavedArticles) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        },
+        onSettingsClick = {
+            navController.navigate(Settings) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        },
+        modifier = modifier.background(MaterialTheme.colorScheme.surface)
+    ) {
+        NavHost(
+            navController = navController,
+            startDestination = Home(),
+            enterTransition = {
+                if (windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.COMPACT)
+                    slideInHorizontally(
+                        initialOffsetX = { it / 4 },
+                        animationSpec = motionScheme.defaultSpatialSpec()
+                    ) + fadeIn(motionScheme.defaultEffectsSpec())
+                else
+                    fadeIn(animationSpec = tween(220, delayMillis = 90)) +
+                            scaleIn(
+                                initialScale = 0.92f,
+                                animationSpec = tween(220, delayMillis = 90)
+                            )
+            },
+            exitTransition = {
+                if (windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.COMPACT)
+                    slideOutHorizontally(
+                        targetOffsetX = { -it / 4 },
+                        animationSpec = motionScheme.fastSpatialSpec()
+                    ) + fadeOut(motionScheme.fastEffectsSpec())
+                else
+                    fadeOut(animationSpec = tween(90))
+            },
+            popEnterTransition = {
+                if (windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.COMPACT)
+                    slideInHorizontally(
+                        initialOffsetX = { -it / 4 },
+                        animationSpec = motionScheme.defaultSpatialSpec()
+                    ) + fadeIn(motionScheme.defaultEffectsSpec())
+                else
+                    fadeIn(animationSpec = tween(220, delayMillis = 90)) +
+                            scaleIn(
+                                initialScale = 0.92f,
+                                animationSpec = tween(220, delayMillis = 90)
+                            )
+            },
+            popExitTransition = {
+                if (windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.COMPACT)
+                    slideOutHorizontally(
+                        targetOffsetX = { it / 4 },
+                        animationSpec = motionScheme.fastSpatialSpec()
+                    ) + fadeOut(motionScheme.fastEffectsSpec())
+                else
+                    fadeOut(animationSpec = tween(90))
+            }
+        ) {
+            composable<Home>(
+                deepLinks = listOf(
+                    navDeepLink { uriPattern = "{lang}.m.wikipedia.org/wiki/{query}" },
+                    navDeepLink { uriPattern = "{lang}.wikipedia.org/wiki/{query}" }
+                )
+            ) { backStackEntry ->
+                val uriQuery = remember { backStackEntry.arguments?.getString("query") }
+                LaunchedEffect(uriQuery) {
+                    if (uriQuery != null && !deepLinkHandled) {
+                        deepLinkHandled = true
+                        val lang = backStackEntry.arguments?.getString("lang")
+                        viewModel.stopAll()
+                        delay(500) // Avoids a race condition where the hostname might not get updated in time
+                        viewModel.loadPage(
+                            uriQuery,
+                            lang = lang
+                        )
+                    }
+                }
+
+                BackHandler(
+                    enabled = if (deepLinkHandled) {
+                        homeScreenState.backStackSize >= 1
+                    } else {
+                        homeScreenState.backStackSize != 0 ||
+                                (homeScreenState.status != WRStatus.FEED_LOADED &&
+                                        homeScreenState.status != WRStatus.FEED_NETWORK_ERROR &&
+                                        homeScreenState.status != WRStatus.UNINITIALIZED)
+                    },
+                    onBack = viewModel::loadPreviousPage
+                )
+
+                if (showDeleteDialog)
+                    DeleteHistoryItemDialog(
+                        historyItem,
+                        setShowDeleteDialog
+                    ) {
+                        if (historyItem != "") viewModel.removeHistoryItem(it)
+                        else viewModel.clearHistory()
+                    }
+
+                Scaffold(
+                    topBar = {
+                        AppSearchBar(
+                            appSearchBarState = appSearchBarState,
+                            searchBarState = searchBarState,
+                            preferencesState = preferencesState,
+                            textFieldState = textFieldState,
+                            scrollBehavior = searchBarScrollBehavior,
+                            searchBarEnabled = !showArticleLanguageSheet,
+                            imageLoader = imageLoader,
+                            searchListState = searchListState,
+                            windowSizeClass = windowSizeClass,
+                            languageSearchStr = languageSearchStr,
+                            languageSearchQuery = languageSearchQuery,
+                            loadSearch = {
+                                scope.launch {
+                                    searchBarState.animateToCollapsed()
+                                }
+                                viewModel.loadSearch(it)
+                            },
+                            loadSearchDebounced = viewModel::loadSearchResultsDebounced,
+                            loadPage = viewModel::loadPage,
+                            saveLang = viewModel::saveLang,
+                            updateLanguageSearchStr = viewModel::updateLanguageSearchStr,
+                            onExpandedChange = {
+                                scope.launch {
+                                    if (it) searchBarState.animateToExpanded()
+                                    else searchBarState.animateToCollapsed()
+                                }
+                            },
+                            setQuery = textFieldState::setTextAndPlaceCursorAtEnd,
+                            clearHistory = {
+                                setHistoryItem("")
+                                setShowDeleteDialog(true)
+                            },
+                            removeHistoryItem = {
+                                setHistoryItem(it)
+                                setShowDeleteDialog(true)
+                            },
+                            onMenuIconClicked = {
+                                scope.launch {
+                                    drawerState.open()
+                                }
+                            }
+                        )
+                    },
+                    floatingActionButton = {
+                        AppFab(
+                            index = if (homeScreenState.status != WRStatus.FEED_LOADED) index else feedIndex,
+                            visible = (searchBarScrollBehavior?.scrollOffset
+                                ?: 0f) != searchBarScrollBehavior?.scrollOffsetLimit,
+                            focusSearch = {
+                                viewModel.focusSearchBar()
+                                textFieldState.setTextAndPlaceCursorAtEnd(textFieldState.text.toString())
+                            },
+                            scrollToTop = {
+                                scope.launch {
+                                    if (homeScreenState.status != WRStatus.FEED_LOADED)
+                                        listState.animateScrollToItem(0)
+                                    else
+                                        feedListState.animateScrollToItem(0)
+                                }
+                            },
+                            performRandomPageSearch = {
+                                scope.launch {
+                                    searchBarState.animateToCollapsed()
+                                }
+                                viewModel.loadPage(
+                                    title = null,
+                                    random = true
+                                )
+                            }
+                        )
+                    },
+                    snackbarHost = { SnackbarHost(snackBarHostState) },
+                    contentWindowInsets =
+                        if (windowSizeClass.windowWidthSizeClass != WindowWidthSizeClass.COMPACT)
+                            ScaffoldDefaults.contentWindowInsets
+                                .only(WindowInsetsSides.Top + WindowInsetsSides.Bottom + WindowInsetsSides.End)
+                        else ScaffoldDefaults.contentWindowInsets,
+                    modifier =
+                        if (searchBarScrollBehavior != null)
+                            Modifier
+                                .fillMaxSize()
+                                .nestedScroll(searchBarScrollBehavior.nestedScrollConnection)
+                        else Modifier.fillMaxSize()
+                ) { insets ->
+                    AppHomeScreen(
+                        homeScreenState = homeScreenState,
+                        listState = listState,
+                        preferencesState = preferencesState,
+                        feedState = feedState,
+                        feedListState = feedListState,
+                        imageLoader = imageLoader,
+                        languageSearchStr = languageSearchStr,
+                        languageSearchQuery = languageSearchQuery,
+                        showLanguageSheet = showArticleLanguageSheet,
+                        onFontSizeChange = viewModel::saveFontSize,
+                        onImageClick = {
+                            if (homeScreenState.photo != null || homeScreenState.status == WRStatus.FEED_LOADED)
+                                navController.navigate(FullScreenImage())
+                        },
+                        onGalleryImageClick = { uri, desc ->
+                            navController.navigate(FullScreenImage(uri, desc))
+                        },
+                        onLinkClick = viewModel::loadPage,
+                        refreshSearch = { viewModel.reloadPage(true) },
+                        refreshFeed = viewModel::loadFeed,
+                        setLang = viewModel::saveLang,
+                        setSearchStr = viewModel::updateLanguageSearchStr,
+                        setShowArticleLanguageSheet = { showArticleLanguageSheet = it },
+                        saveArticle = {
+                            scope.launch {
+                                if (homeScreenState.savedStatus == SavedStatus.NOT_SAVED) {
+                                    val status = viewModel.saveArticle()
+                                    if (status == WRStatus.SUCCESS)
+                                        snackBarHostState.showSnackbar(
+                                            context.getString(
+                                                string.snackbarArticleSaved
+                                            )
+                                        )
+                                    else
+                                        snackBarHostState.showSnackbar(
+                                            context.getString(
+                                                string.snackbarUnableToSave,
+                                                status.name
+                                            )
+                                        )
+                                    delay(150L)
+                                } else if (homeScreenState.savedStatus == SavedStatus.SAVED) {
+                                    val status = viewModel.deleteArticle()
+                                    if (status == WRStatus.SUCCESS)
+                                        snackBarHostState.showSnackbar(
+                                            context.getString(
+                                                string.snackbarArticleDeleted
+                                            )
+                                        )
+                                    else
+                                        snackBarHostState.showSnackbar(
+                                            context.getString(
+                                                string.snackbarUnableToDelete,
+                                                status.name
+                                            )
+                                        )
+                                }
+                            }
+                        },
+                        showFeedErrorSnackBar = {
+                            scope.launch {
+                                if (!deepLinkHandled)
+                                    snackBarHostState
+                                        .showSnackbar(
+                                            context.getString(
+                                                string.snackbarUnableToLoadFeed,
+                                                homeScreenState.status.name
+                                            )
+                                        )
+                            }
+                        },
+                        insets = insets,
+                        windowSizeClass = windowSizeClass,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    StatusBarProtection()
+                }
+            }
+
+            composable<FullScreenImage> {
+                val uri = it.toRoute<FullScreenImage>().uri
+                val description = it.toRoute<FullScreenImage>().description
+
+                if (uri == null) {
+                    if (homeScreenState.status != WRStatus.FEED_LOADED) {
+                        if (homeScreenState.photo == null) navController.navigateUp()
+                        FullScreenImage(
+                            photo = homeScreenState.photo,
+                            photoDesc = homeScreenState.photoDesc,
+                            title = homeScreenState.title,
+                            imageLoader = imageLoader,
+                            background = preferencesState.imageBackground,
+                            link = homeScreenState.photo?.source,
+                            onBack = navController::navigateUp
+                        )
+                    } else {
+                        FullScreenImage(
+                            photo = WikiPhoto(
+                                source = feedState.image?.image?.source ?: "",
+                                width = feedState.image?.image?.width ?: 1,
+                                height = feedState.image?.image?.height ?: 1
+                            ),
+                            photoDesc = WikiPhotoDesc(
+                                label = listOf(
+                                    feedState.image?.description?.text?.parseAsHtml().toString()
+                                ),
+                                description = null
+                            ),
+                            title = feedState.image?.title ?: "",
+                            imageLoader = imageLoader,
+                            link = feedState.image?.filePage,
+                            background = preferencesState.imageBackground,
+                            onBack = navController::navigateUp
+                        )
+                    }
+                } else {
+                    FullScreenImage(
+                        uri = uri,
+                        description = description ?: "",
+                        imageLoader = imageLoader,
+                        link = uri,
+                        background = preferencesState.imageBackground,
+                        onBack = navController::navigateUp
+                    )
+                }
+            }
+
+            composable<SavedArticles> {
+                SavedArticlesScreen(
+                    savedArticlesState = savedArticlesState,
+                    openSavedArticle = {
+                        scope.launch {
+                            navController.navigateUp()
+                            viewModel.loadSavedArticle(it)
+                        }
+                    },
+                    deleteArticle = viewModel::deleteArticle,
+                    deleteAll = viewModel::deleteAllArticles,
+                    onBack = {
+                        navController.navigateUp()
+                        viewModel.updateLanguageFilters()
+                    }
+                )
+            }
+
+            composable<Settings> {
+                SettingsScreen(
+                    preferencesState = preferencesState,
+                    homeScreenState = homeScreenState,
+                    windowSizeClass = windowSizeClass,
+                    languageSearchStr = languageSearchStr,
+                    languageSearchQuery = languageSearchQuery,
+                    themeMap = themeMap,
+                    reverseThemeMap = reverseThemeMap,
+                    fontStyles = fontStyles,
+                    fontStyleMap = fontStyleMap,
+                    reverseFontStyleMap = reverseFontStyleMap,
+                    saveTheme = viewModel::saveTheme,
+                    saveColorScheme = viewModel::saveColorScheme,
+                    saveLang = viewModel::saveLang,
+                    saveFontStyle = viewModel::saveFontStyle,
+                    saveFontSize = viewModel::saveFontSize,
+                    saveBlackTheme = viewModel::saveBlackTheme,
+                    saveDataSaver = viewModel::saveDataSaver,
+                    saveExpandedSections = viewModel::saveExpandedSections,
+                    saveImageBackground = viewModel::saveImageBackground,
+                    saveImmersiveMode = viewModel::saveImmersiveMode,
+                    saveRenderMath = viewModel::saveRenderMath,
+                    saveSearchHistory = viewModel::saveSearchHistory,
+                    updateLanguageSearchStr = viewModel::updateLanguageSearchStr,
+                    loadFeed = viewModel::loadFeed,
+                    reloadPage = viewModel::reloadPage,
+                    onBack = navController::navigateUp,
+                    onResetSettings = viewModel::resetSettings
+                )
+            }
+
+            composable<About> {
+                AboutScreen(onBack = navController::navigateUp)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DeleteHistoryItemDialog(
+    item: String,
+    setShowDeleteDialog: (Boolean) -> Unit,
+    removeHistoryItem: (String) -> Unit
+) {
+    BasicAlertDialog(
+        onDismissRequest = { setShowDeleteDialog(false) }
+    ) {
+        val titleText =
+            if (item != "") stringResource(string.dialogDeleteSearchHistory)
+            else stringResource(string.dialogDeleteSearchHistoryDesc)
+        val descText =
+            if (item != "") stringResource(string.dialogDeleteHistoryItem, item)
+            else stringResource(string.dialogDeleteHistoryItemDesc)
+
+        Surface(
+            modifier = Modifier
+                .wrapContentWidth()
+                .wrapContentHeight(),
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = AlertDialogDefaults.TonalElevation
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text = titleText,
+                    style = typography.headlineSmall
+                )
+                Spacer(modifier = Modifier.padding(16.dp))
+                Text(
+                    text = descText,
+                    style = typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(modifier = Modifier.align(Alignment.End)) {
+                    TextButton(onClick = { setShowDeleteDialog(false) }) {
+                        Text(text = stringResource(string.cancel))
+                    }
+                    TextButton(onClick = {
+                        setShowDeleteDialog(false)
+                        removeHistoryItem(item)
+                    }) {
+                        Text(text = stringResource(string.delete))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusBarProtection(
+    color: Color = MaterialTheme.colorScheme.surface,
+    heightProvider: () -> Float = calculateStatusBarHeight(),
+) {
+    Canvas(Modifier.fillMaxSize()) {
+        val calculatedHeight = heightProvider()
+        drawRect(
+            color = color.copy(alpha = 0.8f),
+            size = Size(size.width, calculatedHeight),
+        )
+    }
+}
+
+@Composable
+fun calculateStatusBarHeight(): () -> Float {
+    val statusBars = WindowInsets.statusBars
+    val density = LocalDensity.current
+    return { statusBars.getTop(density).toFloat() }
+}
+
+
+@Serializable
+data class Home(
+    val lang: String? = null,
+    val query: String? = null
+)
+
+@Serializable
+data class FullScreenImage(
+    val uri: String? = null,
+    val description: String? = null
+)
+
+@Serializable
+object SavedArticles
+
+@Serializable
+object Settings
+
+@Serializable
+object About
